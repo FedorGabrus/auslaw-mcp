@@ -43,6 +43,7 @@ import {
 } from "../../services/jade.js";
 import type { SearchResult } from "../../services/austlii.js";
 import { jadeRateLimiter } from "../../utils/rate-limiter.js";
+import { JadeRequestError } from "../../errors.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function readFixture(name: string): string {
@@ -163,16 +164,40 @@ describe("searchJade", () => {
     expect(results.length).toBeLessThanOrEqual(1);
   });
 
-  it("returns empty array on network error (graceful degradation)", async () => {
+  it("throws JadeRequestError on network error (configured cookie, explicit failure)", async () => {
     mockConfig.jade.sessionCookie = "IID=abc";
     vi.mocked(axios.post).mockRejectedValueOnce(new Error("timeout"));
 
-    const results = await searchJade("test", { type: "case" });
-
-    expect(results).toEqual([]);
+    await expect(searchJade("test", { type: "case" })).rejects.toBeInstanceOf(JadeRequestError);
   });
 
-  it("does not expose session cookie in error messages on AxiosError", async () => {
+  it("throws an expired-cookie JadeRequestError on HTTP 403", async () => {
+    mockConfig.jade.sessionCookie = "IID=abc";
+    const axiosError = Object.assign(new Error("Forbidden"), {
+      isAxiosError: true,
+      response: { status: 403 },
+    });
+    vi.mocked(axios.post).mockRejectedValueOnce(axiosError);
+    vi.mocked(axios.isAxiosError).mockReturnValue(true);
+
+    await expect(searchJade("test", { type: "case" })).rejects.toMatchObject({
+      name: "JadeRequestError",
+      statusCode: 403,
+      message: expect.stringContaining("expired"),
+    });
+  });
+
+  it("throws JadeRequestError on a non-//OK body (e.g. login page served to an expired session)", async () => {
+    mockConfig.jade.sessionCookie = "IID=abc";
+    vi.mocked(axios.post).mockResolvedValueOnce({
+      data: "<!DOCTYPE html><html><title>Sign in - BarNet Jade</title></html>",
+      status: 200,
+    });
+
+    await expect(searchJade("test", { type: "case" })).rejects.toBeInstanceOf(JadeRequestError);
+  });
+
+  it("does not expose the session cookie in thrown error messages on AxiosError", async () => {
     mockConfig.jade.sessionCookie = "IID=secret123; alcsessionid=abc456";
     const axiosError = Object.assign(new Error("Network Error"), {
       isAxiosError: true,
@@ -184,9 +209,13 @@ describe("searchJade", () => {
     vi.mocked(axios.post).mockRejectedValueOnce(axiosError);
     vi.mocked(axios.isAxiosError).mockReturnValue(true);
 
-    // Should not throw — graceful degradation
-    const results = await searchJade("test", { type: "case" });
-    expect(results).toEqual([]);
+    // Now throws explicitly — but the message must never carry the cookie.
+    await expect(searchJade("test", { type: "case" })).rejects.toSatisfy((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return (
+        err instanceof JadeRequestError && !msg.includes("secret123") && !msg.includes("abc456")
+      );
+    });
   });
 
   it("embeds the query in the POST body", async () => {
@@ -202,17 +231,19 @@ describe("searchJade", () => {
     expect(postBody).toContain("rice v asplund");
   });
 
-  it("returns empty array on AxiosError (logs warning, does not throw)", async () => {
+  it("throws JadeRequestError carrying the status on a non-auth HTTP error (503)", async () => {
     mockConfig.jade.sessionCookie = "IID=abc";
-    const axiosError = Object.assign(new Error("Network Error"), {
+    const axiosError = Object.assign(new Error("Service Unavailable"), {
       isAxiosError: true,
       response: { status: 503 },
     });
     vi.mocked(axios.post).mockRejectedValueOnce(axiosError);
     vi.mocked(axios.isAxiosError).mockReturnValue(true);
 
-    const results = await searchJade("test", { type: "case" });
-    expect(results).toEqual([]);
+    await expect(searchJade("test", { type: "case" })).rejects.toMatchObject({
+      name: "JadeRequestError",
+      statusCode: 503,
+    });
   });
 });
 

@@ -39,15 +39,22 @@ function withAglc4(results: SearchResult[]): (SearchResult & { aglc4: string })[
 export function formatSearchResults(
   results: SearchResult[],
   format: ResponseFormat,
+  warnings: string[] = [],
 ): CallToolResult {
   const enriched = withAglc4(results);
+  const hasWarnings = warnings.length > 0;
   switch (format) {
     case "json":
       return {
-        content: ensureContent(JSON.stringify(enriched, null, 2)),
+        // Preserve the bare-array shape when there are no warnings (backward
+        // compatible); wrap with a `warnings` field only when one is present.
+        content: ensureContent(
+          JSON.stringify(hasWarnings ? { warnings, results: enriched } : enriched, null, 2),
+        ),
         structuredContent: {
           format: "json",
           data: enriched,
+          ...(hasWarnings ? { warnings } : {}),
         },
       };
     case "html": {
@@ -67,8 +74,11 @@ export function formatSearchResults(
           }${reported}${aglc4}${summary}</li>`;
         })
         .join("\n");
+      const htmlWarnings = hasWarnings
+        ? warnings.map((w) => `<p class="warning">⚠️ ${escapeHtml(w)}</p>`).join("\n") + "\n"
+        : "";
       return {
-        content: ensureContent(`<ul>\n${rows}\n</ul>`),
+        content: ensureContent(`${htmlWarnings}<ul>\n${rows}\n</ul>`),
       };
     }
     case "markdown": {
@@ -76,8 +86,9 @@ export function formatSearchResults(
         const summary = result.summary ? ` - ${result.summary}` : "";
         return `- [${result.title}](${result.url}) (\`${result.aglc4}\`)${summary}`;
       });
+      const mdWarnings = hasWarnings ? warnings.map((w) => `> ⚠️ ${w}`).join("\n") + "\n\n" : "";
       return {
-        content: ensureContent(lines.join("\n")),
+        content: ensureContent(mdWarnings + lines.join("\n")),
       };
     }
     case "text":
@@ -86,8 +97,9 @@ export function formatSearchResults(
         const summary = result.summary ? `\n  ${result.summary}` : "";
         return `${idx + 1}. ${result.aglc4}\n   ${result.url}${summary}`;
       });
+      const textWarnings = hasWarnings ? warnings.map((w) => `⚠️  ${w}`).join("\n") + "\n\n" : "";
       return {
-        content: ensureContent(lines.join("\n")),
+        content: ensureContent(textWarnings + lines.join("\n")),
       };
     }
   }

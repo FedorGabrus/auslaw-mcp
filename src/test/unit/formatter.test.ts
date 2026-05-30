@@ -111,6 +111,41 @@ describe("formatSearchResults", () => {
   });
 });
 
+describe("formatSearchResults — warnings", () => {
+  const warn = ["jade.io results unavailable — cookie expired"];
+
+  it("keeps the bare-array JSON shape when there are no warnings (backward compatible)", () => {
+    const result = formatSearchResults(sampleResults, "json", []);
+    const parsed = JSON.parse(getText(result.content));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(result.structuredContent).not.toHaveProperty("warnings");
+  });
+
+  it("wraps JSON with a warnings field and still includes results", () => {
+    const result = formatSearchResults(sampleResults, "json", warn);
+    const parsed = JSON.parse(getText(result.content));
+    expect(parsed.warnings).toEqual(warn);
+    expect(parsed.results.length).toBe(sampleResults.length);
+    expect(parsed.results[0].title).toContain("Donoghue");
+    expect(result.structuredContent).toMatchObject({ warnings: warn });
+  });
+
+  it("prepends the warning in text format while keeping results", () => {
+    const text = getText(formatSearchResults(sampleResults, "text", warn).content);
+    expect(text).toContain("cookie expired");
+    expect(text).toContain("Donoghue");
+  });
+
+  it("prepends the warning in markdown and html formats", () => {
+    expect(getText(formatSearchResults(sampleResults, "markdown", warn).content)).toContain(
+      "cookie expired",
+    );
+    expect(getText(formatSearchResults(sampleResults, "html", warn).content)).toContain(
+      "cookie expired",
+    );
+  });
+});
+
 it("ensureContent returns empty-text content item when given empty string", () => {
   // formatFetchResponse with empty text triggers the false branch of ensureContent
   const response = {
