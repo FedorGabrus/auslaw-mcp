@@ -30,6 +30,7 @@ vi.mock("../../utils/rate-limiter.js", () => ({
 }));
 
 import { searchCitingCases } from "../../services/jade.js";
+import { JadeRequestError } from "../../errors.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 function readFixture(name: string): string {
@@ -96,13 +97,29 @@ describe("searchCitingCases", () => {
     expect(totalCount).toBe(695);
   });
 
-  it("returns empty on proposeCitables network error (graceful degradation)", async () => {
+  it("throws JadeRequestError on proposeCitables network error (explicit failure)", async () => {
     mockConfig.jade.sessionCookie = "IID=abc";
     vi.mocked(axios.post).mockRejectedValueOnce(new Error("timeout"));
 
-    const result = await searchCitingCases("Mabo v Queensland (No 2)");
-    expect(result.results).toEqual([]);
-    expect(result.totalCount).toBe(0);
+    await expect(searchCitingCases("Mabo v Queensland (No 2)")).rejects.toBeInstanceOf(
+      JadeRequestError,
+    );
+  });
+
+  it("throws an expired-cookie JadeRequestError on HTTP 401", async () => {
+    mockConfig.jade.sessionCookie = "IID=abc";
+    const axiosError = Object.assign(new Error("Unauthorized"), {
+      isAxiosError: true,
+      response: { status: 401 },
+    });
+    vi.mocked(axios.post).mockRejectedValueOnce(axiosError);
+    vi.mocked(axios.isAxiosError).mockReturnValue(true);
+
+    await expect(searchCitingCases("Mabo v Queensland (No 2)")).rejects.toMatchObject({
+      name: "JadeRequestError",
+      statusCode: 401,
+      message: expect.stringContaining("expired"),
+    });
   });
 
   it("returns empty if no citable IDs found in proposeCitables response", async () => {
@@ -118,7 +135,7 @@ describe("searchCitingCases", () => {
     expect(result.totalCount).toBe(0);
   });
 
-  it("does not expose session cookie in error messages on AxiosError", async () => {
+  it("does not expose the session cookie in thrown error messages on AxiosError", async () => {
     mockConfig.jade.sessionCookie = "IID=secret123; alcsessionid=abc456";
     const axiosError = Object.assign(new Error("Network Error"), {
       isAxiosError: true,
@@ -128,8 +145,11 @@ describe("searchCitingCases", () => {
     vi.mocked(axios.post).mockRejectedValueOnce(axiosError);
     vi.mocked(axios.isAxiosError).mockReturnValue(true);
 
-    const result = await searchCitingCases("test case");
-    expect(result.results).toEqual([]);
-    expect(result.totalCount).toBe(0);
+    await expect(searchCitingCases("test case")).rejects.toSatisfy((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return (
+        err instanceof JadeRequestError && !msg.includes("secret123") && !msg.includes("abc456")
+      );
+    });
   });
 });

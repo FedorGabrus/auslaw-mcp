@@ -43,6 +43,7 @@ import {
 } from "./services/citation-cache.js";
 import { storeSource, checkSourceFreshness } from "./services/source-store.js";
 import { config } from "./config.js";
+import { JadeRequestError } from "./errors.js";
 
 const formatEnum = z.enum(["json", "text", "markdown", "html"]).default("json");
 const jurisdictionEnum = z.enum([
@@ -161,22 +162,31 @@ function createMcpServer(): McpServer {
     {
       title: "Search Cases",
       description:
-        "Search Australian and New Zealand case law. Queries AustLII (via a local headless-Chrome Cloudflare bypass) and, when JADE_SESSION_COOKIE is set, also queries jade.io in parallel and merges the results — without the cookie, results are AustLII-only (jade.io degrades silently). Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (case names only), phrase (exact match), all (all words), any (any word), near (proximity), boolean. Sorting: auto (smart detection), relevance, date. `limit` is applied client-side. Use offset for pagination (e.g., offset=50 for page 2).",
+        "Search Australian and New Zealand case law. Queries AustLII (via a local headless-Chrome Cloudflare bypass) and, when JADE_SESSION_COOKIE is set, also queries jade.io in parallel and merges the results — without the cookie, results are AustLII-only (jade.io is skipped quietly). If jade.io fails (e.g. an expired cookie), AustLII results are still returned with a `warnings` entry naming the failure. Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (case names only), phrase (exact match), all (all words), any (any word), near (proximity), boolean. Sorting: auto (smart detection), relevance, date. `limit` is applied client-side. Use offset for pagination (e.g., offset=50 for page 2).",
       inputSchema: searchCasesShape,
     },
     async (rawInput) => {
       const { query, jurisdiction, limit, format, sortBy, method, offset } =
         searchCasesParser.parse(rawInput);
 
-      // Run AustLII and jade.io searches in parallel
+      // Run AustLII and jade.io searches in parallel. jade.io is secondary here,
+      // so a jade failure (e.g. an expired cookie) must NOT take down the AustLII
+      // results — surface it as a visible warning instead and keep going.
+      const warnings: string[] = [];
       const [austliiResults, jadeResults] = await Promise.all([
         searchAustLii(query, { type: "case", jurisdiction, limit, sortBy, method, offset }),
-        searchJade(query, { type: "case", jurisdiction, limit }),
+        searchJade(query, { type: "case", jurisdiction, limit }).catch((error): SearchResult[] => {
+          if (error instanceof JadeRequestError) {
+            warnings.push(`jade.io results unavailable — ${error.message}`);
+            return [];
+          }
+          throw error;
+        }),
       ]);
 
       const merged = mergeCaseSearchResults(austliiResults, jadeResults, limit);
 
-      return formatSearchResults(merged, format ?? "json");
+      return formatSearchResults(merged, format ?? "json", warnings);
     },
   );
 
@@ -987,13 +997,34 @@ function createMcpServer(): McpServer {
         };
       }
 
-      // Search jade.io for cases that cite this one
+      // Search jade.io for cases that cite this one. A configured-but-expired
+      // cookie throws JadeRequestError — report it explicitly and preserve the
+      // existing cache rather than letting the error blow away cached data.
       const query = parent.neutralCitation ?? parent.title;
-      const { results, totalCount } = await searchCitingCases(query);
+      let results: Awaited<ReturnType<typeof searchCitingCases>>["results"];
+      let totalCount: number;
+      try {
+        ({ results, totalCount } = await searchCitingCases(query));
+      } catch (error) {
+        if (error instanceof JadeRequestError) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  error: `${error.message} Existing cache preserved.`,
+                  existingCount: parent.citedBy?.length ?? 0,
+                }),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
 
-      // Guard: if the API returns nothing but we have prior data, treat this as
-      // a likely failure (bad/expired cookie, network error) rather than a
-      // genuine empty set — preserving existing cache instead of erasing it.
+      // Secondary guard (covers a //OK-empty expiry that doesn't throw): if the
+      // API returns nothing but we have prior data, treat this as a likely
+      // failure rather than a genuine empty set — preserving existing cache.
       if (results.length === 0 && totalCount === 0 && (parent.citedBy?.length ?? 0) > 0) {
         return {
           content: [

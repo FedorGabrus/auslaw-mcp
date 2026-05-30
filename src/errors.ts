@@ -49,6 +49,22 @@ export class ParseError extends Error {
 }
 
 /**
+ * Error thrown when a jade.io GWT-RPC request fails (HTTP error, GWT exception,
+ * or an unexpected/non-`//OK` response body). The most common real-world cause
+ * is an expired `JADE_SESSION_COOKIE`, so callers surface this explicitly rather
+ * than silently degrading to empty results.
+ */
+export class JadeRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+  ) {
+    super(message);
+    this.name = "JadeRequestError";
+  }
+}
+
+/**
  * Error thrown when OCR processing fails.
  */
 export class OcrError extends Error {

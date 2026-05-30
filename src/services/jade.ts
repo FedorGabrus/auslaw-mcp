@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { SearchResult, SearchOptions } from "./austlii.js";
 import { config } from "../config.js";
+import { JadeRequestError } from "../errors.js";
 import { jadeRateLimiter } from "../utils/rate-limiter.js";
 import {
   buildAvd2Request,
@@ -368,19 +369,56 @@ async function resolveBridgeCandidates(flatArray: unknown[]): Promise<Map<string
 }
 
 /**
+ * Converts a caught jade.io request failure into an explicit {@link JadeRequestError}.
+ *
+ * IMPORTANT: never include the raw axios error (or its `config`) in the thrown
+ * message — `config.headers.Cookie` carries the full `JADE_SESSION_COOKIE` and
+ * must not leak to callers or logs. We surface only the HTTP status and a short
+ * reason. The dominant real-world cause is an expired session cookie, so HTTP
+ * 401/403 is reported as such; other failures are still surfaced explicitly.
+ */
+function throwJadeFailure(context: string, error: unknown): never {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    if (status === 401 || status === 403) {
+      throw new JadeRequestError(
+        `jade.io ${context} failed (HTTP ${status}). JADE_SESSION_COOKIE has likely expired — ` +
+          `re-extract it from your browser session (see README).`,
+        status,
+      );
+    }
+    // No response = network/timeout; an unexpected status = something else.
+    // Surface it explicitly either way rather than degrading to empty results.
+    throw new JadeRequestError(
+      `jade.io ${context} failed${status ? ` (HTTP ${status})` : ""}: ${error.message}.`,
+      status,
+    );
+  }
+  // Non-axios: a parser throw on a `//EX` GWT exception or a non-`//OK` body
+  // (e.g. an HTML login page served to an expired session) — a likely-expiry signal.
+  throw new JadeRequestError(
+    `jade.io ${context} failed: ${error instanceof Error ? error.message : String(error)}. ` +
+      `If this persists, JADE_SESSION_COOKIE may have expired.`,
+  );
+}
+
+/**
  * Searches jade.io using the proposeCitables GWT-RPC method.
  *
  * proposeCitables is jade.io's internal search/autocomplete endpoint, reverse-engineered
  * from HAR analysis (2026-03-03). It returns case names, neutral citations, reported
  * citations, and jade.io article IDs in a single response.
  *
- * Requires JADE_SESSION_COOKIE. Returns an empty array (graceful degradation) if the
- * cookie is not configured or if the request fails — jade search failure should not
- * prevent AustLII results from being returned.
+ * Returns an empty array only when JADE_SESSION_COOKIE is *not configured* (jade is
+ * opt-in). When a cookie IS configured but the request fails — HTTP error, GWT
+ * exception, or a non-`//OK` body (typical of an expired session) — this throws a
+ * {@link JadeRequestError} rather than silently returning empty, so an expired cookie
+ * surfaces loudly instead of degrading to AustLII-only results.
  *
  * @param query - Search query string
  * @param options - Search options (type, jurisdiction, limit, etc.)
- * @returns Array of SearchResult objects, empty if search fails or cookie is missing
+ * @returns Array of SearchResult objects (empty array only when no cookie is configured)
+ * @throws {JadeRequestError} If a configured cookie's request fails (likely expired)
  */
 export async function searchJade(query: string, options: SearchOptions): Promise<SearchResult[]> {
   if (!config.jade.sessionCookie) {
@@ -446,19 +484,8 @@ export async function searchJade(query: string, options: SearchOptions): Promise
     const limit = options.limit ?? filtered.length;
     return filtered.slice(0, limit);
   } catch (error) {
-    // Sanitise AxiosError to prevent session cookie leaking into error messages
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      console.warn(
-        `jade.io proposeCitables search failed${status ? ` (HTTP ${status})` : ""} — returning empty results`,
-      );
-    } else {
-      console.warn(
-        "jade.io search failed:",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    return [];
+    // Surface the failure explicitly (sanitised — no cookie leak). See throwJadeFailure.
+    throwJadeFailure("proposeCitables search", error);
   }
 }
 
@@ -530,11 +557,13 @@ export interface CitatorSearchResult {
  * 2. Use the citable ID to call `LeftoverRemoteService.search` (citator)
  * 3. Parse the citator response and return citing cases with totalCount
  *
- * Requires JADE_SESSION_COOKIE. Returns empty results (graceful degradation)
- * if the cookie is not configured or any request fails.
+ * Returns empty results only when JADE_SESSION_COOKIE is *not configured*. When a
+ * cookie IS configured but a request fails, throws a {@link JadeRequestError} so an
+ * expired cookie surfaces loudly instead of looking like "no citing cases".
  *
  * @param caseName - Case name or citation to look up (passed to proposeCitables)
  * @returns Citing cases found on jade.io, plus the total count
+ * @throws {JadeRequestError} If a configured cookie's request fails (likely expired)
  */
 export async function searchCitingCases(caseName: string): Promise<CitatorSearchResult> {
   const empty: CitatorSearchResult = { results: [], totalCount: 0 };
@@ -590,17 +619,6 @@ export async function searchCitingCases(caseName: string): Promise<CitatorSearch
     const { results, totalCount } = parseCitatorResponse(citatorResponse.data as string);
     return { results, totalCount };
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      console.warn(
-        `jade.io citator search failed${status ? ` (HTTP ${status})` : ""} — returning empty results`,
-      );
-    } else {
-      console.warn(
-        "jade.io citator search failed:",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    return empty;
+    throwJadeFailure("citator search", error);
   }
 }
