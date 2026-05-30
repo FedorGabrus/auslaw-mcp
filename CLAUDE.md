@@ -18,6 +18,12 @@ npm run lint:fix       # Auto-fix lint issues
 - Unit tests must all pass before committing; integration/perf test failures from network timeouts are acceptable
 - ESLint uses flat config (`eslint.config.mjs`), NOT legacy `.eslintrc`
 
+## Git & Branching
+
+- **`prod` is the real main/production branch** — it is the default working branch and the base for PRs.
+- **`main` is kept only for backward compatibility** — do not treat it as the integration branch.
+- **Never push directly to `prod`** — a GitHub branch-protection rule blocks direct pushes. Open a PR against `prod` and merge through it.
+
 ## Key Architecture
 
 - `src/index.ts` - MCP server, 18 tool registrations
