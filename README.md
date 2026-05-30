@@ -225,6 +225,43 @@ Once the MCP is connected, you can ask an AI assistant like Claude natural langu
 
 ## Available Tools
 
+The server registers **18 tools** across three clusters. Operational requirements: AustLII access needs a local **Google Chrome** (spawned and driven over CDP to clear Cloudflare — see Quick Start); all **jade.io** features (case search, content fetch, citator/cited-by) need **`JADE_SESSION_COOKIE`**. Without the cookie, `search_cases` returns AustLII-only results and the jade.io-only tools degrade silently (empty results).
+
+**Search & retrieval (live network):**
+
+| Tool                   | What it does                                                                                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_cases`         | Search AU/NZ case law on AustLII; also merges jade.io results when `JADE_SESSION_COOKIE` is set. `limit` applied client-side.                                                           |
+| `search_legislation`   | Search AU/NZ legislation on AustLII (Chrome bypass).                                                                                                                                    |
+| `fetch_document_text`  | Fetch full text from an AustLII (Chrome) or jade.io (GWT-RPC, cookie required) URL; scanned PDFs fall back to OCR automatically. Optionally caches a local copy when given a `citeKey`. |
+| `resolve_jade_article` | Resolve a jade.io article by numeric ID via a cookie-free public GET, parsing the page `<title>`. Returns `accessible:false` for non-public IDs.                                        |
+| `jade_citation_lookup` | Build a jade.io search URL for a neutral citation (no API call).                                                                                                                        |
+| `search_citing_cases`  | Find cases citing a given case via jade.io's citator (cookie required). Returns a sample plus a best-effort total count.                                                                |
+
+**AGLC4 citation tooling (mostly offline):**
+
+| Tool                    | What it does                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `format_citation`       | Format a full AGLC4 case citation from its components.                                                |
+| `format_short_citation` | Format AGLC4 short-form, _Ibid_, or subsequent references.                                            |
+| `generate_pinpoint`     | Fetch a judgment and build a pinpoint to a paragraph (by number or phrase).                           |
+| `validate_citation`     | Check a neutral citation exists on AustLII (via the Chrome bypass); returns the canonical URL.        |
+| `search_by_citation`    | Resolve a citation to a direct URL (validates neutral citations) or falls back to a case-name search. |
+
+**Local citation cache / bibliography (offline + opt-in source caching):**
+
+| Tool                     | What it does                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `cache_citation`         | Store/update a citation in the project cache; assigns a biblatex cite key.                        |
+| `get_cached_citation`    | Look up a cached citation (cite key, AGLC4 string, neutral citation, or title) — no network.      |
+| `list_bibliography`      | List cached citations, optionally filtered to a document.                                         |
+| `export_bibliography`    | Export cached citations as a BibLaTeX `.bib` file.                                                |
+| `check_source_freshness` | Re-check a cached source's freshness (conditional request) and refresh the local copy if changed. |
+| `cache_cited_by`         | Fetch and locally store the cited-by set for a cached case (jade.io, cookie required).            |
+| `get_cited_by`           | Return the locally cached cited-by list — no network.                                             |
+
+Detailed parameter tables for the most-used tools follow.
+
 ### search_cases
 
 Search Australian and New Zealand case law.

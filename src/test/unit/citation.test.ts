@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import axios from "axios";
 import {
   parseCitation,
   formatAGLC4,
@@ -13,7 +12,15 @@ import {
   generatePinpoint,
   type Pinpoint,
 } from "../../services/citation.js";
+import { austliiFetchText } from "../../services/austlii-browser.js";
 import type { ParagraphBlock } from "../../services/fetcher.js";
+
+// validateCitation now checks existence via the AustLII browser transport
+// (Cloudflare bypass), not axios.head. Mock that seam.
+vi.mock("../../services/austlii-browser.js", () => ({
+  austliiFetchText: vi.fn(),
+}));
+const mockedFetch = vi.mocked(austliiFetchText);
 
 describe("parseCitation", () => {
   it("extracts neutral citation from plain string", () => {
@@ -132,7 +139,7 @@ describe("validateCitation", () => {
   });
 
   it("returns valid=true for known neutral citation (mocked 200)", async () => {
-    vi.spyOn(axios, "head").mockResolvedValueOnce({ status: 200 });
+    mockedFetch.mockResolvedValueOnce({ status: 200, body: "<html></html>" });
     const result = await validateCitation("[1992] HCA 23");
     expect(result.valid).toBe(true);
     expect(result.austliiUrl).toContain("HCA");
@@ -150,7 +157,7 @@ describe("validateCitation", () => {
   });
 
   it("returns valid=false on 404 (mocked)", async () => {
-    vi.spyOn(axios, "head").mockRejectedValueOnce({ response: { status: 404 } });
+    mockedFetch.mockResolvedValueOnce({ status: 404, body: "" });
     const result = await validateCitation("[9999] HCA 999");
     expect(result.valid).toBe(false);
   });

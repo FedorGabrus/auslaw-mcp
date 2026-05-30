@@ -10,7 +10,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import axios from "axios";
-import { fetchDocumentText } from "./fetcher.js";
+import { fetchDocumentText, isAustliiUrl } from "./fetcher.js";
 import { assertFetchableUrl } from "../utils/url-guard.js";
 
 export interface FreshnessResult {
@@ -38,12 +38,18 @@ export interface StoreSourceResult {
  *
  * Returns `fresh: true` (HTTP 304) or `fresh: false` (HTTP 200 / error).
  * Network errors are treated as stale so the caller falls back to re-fetching.
+ *
+ * AustLII URLs are reached through a real-Chrome bypass that cannot perform a
+ * meaningful conditional HEAD (Cloudflare 403s a plain HEAD, and the in-page
+ * fetch does not expose ETag/Last-Modified), so we report `fresh: false`
+ * immediately and let the caller re-fetch and compare a content hash instead.
  */
 export async function checkSourceFreshness(
   url: string,
   etag?: string,
   lastModified?: string,
 ): Promise<FreshnessResult> {
+  if (isAustliiUrl(url)) return { fresh: false };
   try {
     assertFetchableUrl(url);
     const headers: Record<string, string> = {};
@@ -122,7 +128,9 @@ export async function storeSource(
   // otherwise attempt a HEAD request (non-fatal, many servers omit these headers).
   let etag: string | undefined = prefetchedDoc?.etag;
   let lastModified: string | undefined = prefetchedDoc?.lastModified;
-  if (!etag && !lastModified) {
+  // AustLII goes through the browser bypass, which exposes no cache headers and
+  // 403s a plain HEAD — skip it; freshness for AustLII relies on the content hash.
+  if (!etag && !lastModified && !isAustliiUrl(url)) {
     try {
       assertFetchableUrl(url);
       const headResp = await axios.head(url, { timeout: 10_000 });

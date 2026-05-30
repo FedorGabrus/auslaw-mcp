@@ -6,13 +6,13 @@
  * AGLC4-compliant citation parsing, formatting, validation, and normalisation.
  */
 
-import axios from "axios";
 import {
   NEUTRAL_CITATION_PATTERN,
   REPORTED_CITATION_PATTERNS,
   COURT_TO_AUSTLII_PATH,
   REPORTERS,
 } from "../constants.js";
+import { austliiFetchText } from "./austlii-browser.js";
 import type { ParagraphBlock } from "./fetcher.js";
 
 export interface ParsedCitation {
@@ -244,9 +244,19 @@ export async function validateCitation(citation: string): Promise<CitationValida
   }
   const url = `https://www.austlii.edu.au/cgi-bin/viewdoc/${path}/${year}/${num}.html`;
   try {
-    await axios.head(url, { timeout: 10000 });
-    return { valid: true, canonicalCitation: normalised, austliiUrl: url };
+    // AustLII is behind Cloudflare; a plain HTTP HEAD now returns 403. Route the
+    // existence check through the same real-Chrome transport used for fetches.
+    const { status } = await austliiFetchText(url);
+    if (status === 200) {
+      return { valid: true, canonicalCitation: normalised, austliiUrl: url };
+    }
+    return {
+      valid: false,
+      message: "Citation not found on AustLII",
+      austliiUrl: url,
+    };
   } catch {
+    // Transport unavailable (e.g. AUSTLII_BROWSER_BYPASS=false) — cannot confirm.
     return {
       valid: false,
       message: "Citation not found on AustLII",

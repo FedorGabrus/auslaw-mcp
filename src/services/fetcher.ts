@@ -19,7 +19,7 @@ import { assertFetchableUrl } from "../utils/url-guard.js";
 import { austliiRateLimiter, jadeRateLimiter } from "../utils/rate-limiter.js";
 
 /** AustLII is behind a Cloudflare challenge; its URLs are fetched via a browser. */
-function isAustliiUrl(url: string): boolean {
+export function isAustliiUrl(url: string): boolean {
   try {
     return new URL(url).hostname.endsWith("austlii.edu.au");
   } catch {

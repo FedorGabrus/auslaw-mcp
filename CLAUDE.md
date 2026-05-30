@@ -20,12 +20,13 @@ npm run lint:fix       # Auto-fix lint issues
 
 ## Key Architecture
 
-- `src/index.ts` - MCP server, 10 tool registrations
+- `src/index.ts` - MCP server, 18 tool registrations
+- `src/services/austlii-browser.ts` - AustLII Cloudflare bypass: spawns real Chrome via CDP (`connectOverCDP`), warms a `cf_clearance` session, fetches via in-page `fetch()`. `austliiFetchText`/`austliiFetchBuffer` are the only paths that reach AustLII (plain axios now gets a 403 challenge)
 - `src/services/jade-gwt.ts` - GWT-RPC protocol: `proposeCitables` (search), `avd2Request` (fetch), citator, strong names, GWT encoding
 - `src/services/jade.ts` - jade.io integration: `searchJade`, `resolveArticle`, `searchCitingCases`, bridge section resolution
-- `src/services/austlii.ts` - AustLII search with authority-based ranking
-- `src/services/citation.ts` - AGLC4 formatting, validation, pinpoints
-- `src/services/fetcher.ts` - Document retrieval (HTML, PDF, OCR, jade.io GWT-RPC)
+- `src/services/austlii.ts` - AustLII search with authority-based ranking (transport via `austlii-browser.ts`; drops the `results` param to avoid a WAF 410 signature, applies `limit` client-side)
+- `src/services/citation.ts` - AGLC4 formatting, validation, pinpoints. `validateCitation` does its AustLII existence check through `austlii-browser.ts` (not axios)
+- `src/services/fetcher.ts` - Document retrieval (HTML, PDF, OCR; AustLII via `austlii-browser.ts`, jade.io via GWT-RPC)
 - `docs/jade-gwt-protocol.md` - GWT-RPC reverse-engineering documentation
 
 ## jade.io GWT-RPC

@@ -11,7 +11,18 @@ vi.mock("node:fs", () => ({
 }));
 
 vi.mock("axios");
-vi.mock("../../services/fetcher.js");
+// Keep a REAL isAustliiUrl so source-store's AustLII-skip branch is genuinely
+// exercised; only fetchDocumentText is stubbed.
+vi.mock("../../services/fetcher.js", () => ({
+  fetchDocumentText: vi.fn(),
+  isAustliiUrl: (url: string): boolean => {
+    try {
+      return new URL(url).hostname.endsWith("austlii.edu.au");
+    } catch {
+      return false;
+    }
+  },
+}));
 vi.mock("../../utils/url-guard.js");
 
 import axios from "axios";
@@ -20,7 +31,9 @@ import { assertFetchableUrl } from "../../utils/url-guard.js";
 import { checkSourceFreshness, storeSource } from "../../services/source-store.js";
 
 const SOURCES_DIR = "/test/project/sources";
-const TEST_URL = "https://www.austlii.edu.au/cgi-bin/viewdoc/au/cases/cth/HCA/1992/23.html";
+// A non-AustLII source exercises the conditional-HEAD path (AustLII skips it).
+const TEST_URL = "https://www.legislation.gov.au/Details/C2024A00001";
+const AUSTLII_URL = "https://www.austlii.edu.au/cgi-bin/viewdoc/au/cases/cth/HCA/1992/23.html";
 const SAMPLE_TEXT = "The High Court held that native title exists.";
 
 beforeEach(() => {
@@ -95,6 +108,19 @@ describe("checkSourceFreshness", () => {
     expect(validateStatus!(304)).toBe(true);
     expect(validateStatus!(404)).toBe(false);
     expect(validateStatus!(500)).toBe(false);
+  });
+
+  it("skips the HEAD request for AustLII URLs (Cloudflare 403s plain HEAD)", async () => {
+    // AustLII is reached via the browser bypass; a plain HEAD would 403. The
+    // function must short-circuit to fresh:false without touching axios.head so
+    // the caller falls back to a content-hash comparison.
+    const result = await checkSourceFreshness(
+      AUSTLII_URL,
+      '"etag"',
+      "Tue, 31 Dec 2025 00:00:00 GMT",
+    );
+    expect(result.fresh).toBe(false);
+    expect(axios.head).not.toHaveBeenCalled();
   });
 });
 
@@ -193,6 +219,23 @@ describe("storeSource", () => {
 
     const result = await storeSource("mabo1992", TEST_URL, null, SOURCES_DIR);
     expect(result.etag).toBeUndefined();
+  });
+
+  it("does not issue a HEAD for AustLII etag capture (browser bypass exposes none)", async () => {
+    vi.mocked(fetchDocumentText).mockResolvedValue({
+      text: SAMPLE_TEXT,
+      contentType: "text/html",
+      sourceUrl: AUSTLII_URL,
+      ocrUsed: false,
+    });
+
+    const result = await storeSource("mabo1992", AUSTLII_URL, null, SOURCES_DIR);
+
+    expect(fetchDocumentText).toHaveBeenCalledOnce();
+    expect(axios.head).not.toHaveBeenCalled();
+    expect(result.etag).toBeUndefined();
+    expect(result.lastModified).toBeUndefined();
+    expect(result.changed).toBe(true);
   });
 
   it("falls back to cached.sourceEtag when 304 response has no etag (line 102 ?? false branch)", async () => {

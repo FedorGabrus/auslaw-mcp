@@ -127,7 +127,7 @@ function createMcpServer(): McpServer {
     {
       title: "Search Legislation",
       description:
-        "Search Australian and New Zealand legislation. Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (titles only), phrase (exact match), all (all words), any (any word), near (proximity), legis (legislation names). Use offset for pagination.",
+        "Search Australian and New Zealand legislation on AustLII (via a local headless-Chrome Cloudflare bypass). Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (titles only), phrase (exact match), all (all words), any (any word), near (proximity), legis (legislation names). `limit` is applied client-side. Use offset for pagination.",
       inputSchema: searchLegislationShape,
     },
     async (rawInput) => {
@@ -161,7 +161,7 @@ function createMcpServer(): McpServer {
     {
       title: "Search Cases",
       description:
-        "Search Australian and New Zealand case law. Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (case names only), phrase (exact match), all (all words), any (any word), near (proximity), boolean. Sorting: auto (smart detection), relevance, date. Use offset for pagination (e.g., offset=50 for page 2).",
+        "Search Australian and New Zealand case law. Queries AustLII (via a local headless-Chrome Cloudflare bypass) and, when JADE_SESSION_COOKIE is set, also queries jade.io in parallel and merges the results — without the cookie, results are AustLII-only (jade.io degrades silently). Jurisdictions: cth, vic, nsw, qld, sa, wa, tas, nt, act, federal, nz, other (all). Methods: auto, title (case names only), phrase (exact match), all (all words), any (any word), near (proximity), boolean. Sorting: auto (smart detection), relevance, date. `limit` is applied client-side. Use offset for pagination (e.g., offset=50 for page 2).",
       inputSchema: searchCasesShape,
     },
     async (rawInput) => {
@@ -197,7 +197,7 @@ function createMcpServer(): McpServer {
     {
       title: "Fetch Document Text",
       description:
-        "Fetch full text for a legislation or case URL (AustLII or jade.io), with OCR fallback for scanned PDFs. When a `citeKey` is supplied and AUSLAW_FETCH_SOURCES is not set to 'false', also saves a local markdown copy to the sources directory and updates the cache entry's HTTP freshness headers. Without `citeKey`, only the document text is returned.",
+        "Fetch full text for a legislation or case URL (AustLII or jade.io). AustLII URLs are retrieved through a local headless-Chrome Cloudflare bypass; jade.io URLs use GWT-RPC and REQUIRE JADE_SESSION_COOKIE (otherwise this throws). Scanned PDFs fall back to OCR automatically. When a `citeKey` is supplied and AUSLAW_FETCH_SOURCES is not set to 'false', also saves a local markdown copy to the sources directory and updates the cache entry's HTTP freshness headers. Without `citeKey`, only the document text is returned.",
       inputSchema: fetchDocumentShape,
     },
     async (rawInput) => {
@@ -242,7 +242,7 @@ function createMcpServer(): McpServer {
     {
       title: "Resolve jade.io Article",
       description:
-        "Resolve metadata for a jade.io article by its numeric ID. Returns case name, neutral citation, jurisdiction, and year. Useful for looking up specific articles on jade.io (BarNet Jade).",
+        "Resolve metadata for a jade.io article by its numeric ID. Performs a cookie-free public GET and parses the article page's <title> tag to extract case name, neutral citation, jurisdiction, and year. Returns accessible:false when the title is the generic BarNet Jade placeholder (e.g. the ID is not public or sits behind auth). Useful for looking up specific articles on jade.io (BarNet Jade).",
       inputSchema: resolveJadeArticleShape,
     },
     async (rawInput) => {
@@ -335,7 +335,7 @@ function createMcpServer(): McpServer {
     {
       title: "Validate Citation Against AustLII",
       description:
-        "Validate a neutral citation by checking it exists on AustLII. Returns the canonical URL if valid.",
+        "Validate a neutral citation by checking the canonical document exists on AustLII (via the local headless-Chrome bypass). Returns the canonical URL if valid.",
       inputSchema: validateCitationShape,
     },
     async (rawInput) => {
@@ -473,7 +473,7 @@ function createMcpServer(): McpServer {
     {
       title: "Search Citing Cases (Citator)",
       description:
-        "Find cases that cite a given case on jade.io. Uses jade.io's LeftoverRemoteService citator. Requires JADE_SESSION_COOKIE. Returns citing cases with neutral citations, case names, jade.io URLs, and the total count of citing cases. Results are a sample (typically 20-30) of the full set.",
+        "Find cases that cite a given case on jade.io. Uses jade.io's LeftoverRemoteService citator. Requires JADE_SESSION_COOKIE (without it, returns empty silently). Returns citing cases with neutral citations, case names, and jade.io URLs, plus a best-effort total count parsed from jade.io's response. Results are a sample (typically 20-30) of the full set.",
       inputSchema: searchCitingCasesShape,
     },
     async (rawInput) => {
@@ -791,7 +791,7 @@ function createMcpServer(): McpServer {
     {
       title: "Check Source Freshness",
       description:
-        "Check whether the locally cached source file for a citation is still current. Issues a conditional HEAD request using the stored ETag/Last-Modified. If the remote source is newer, downloads and updates the local copy automatically.",
+        "Check whether the locally cached source file for a citation is still current. For sources that expose HTTP cache headers, issues a conditional HEAD using the stored ETag/Last-Modified. AustLII sources (fetched via the headless-Chrome bypass) expose no cache headers, so freshness is determined by re-fetching and comparing a content hash — for those, the result is always reported as not-fresh with an accurate `changed` flag. Either way, if the remote source differs, the local copy is downloaded and updated automatically.",
       inputSchema: checkSourceFreshnessShape,
     },
     async (rawInput) => {
