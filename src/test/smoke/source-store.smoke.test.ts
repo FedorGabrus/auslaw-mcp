@@ -2,17 +2,17 @@
  * Smoke tests for source-store functions.
  * Network tests are skipped in CI.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { checkSourceFreshness, storeSource } from "../../services/source-store.js";
+import { itLive } from "../helpers/live.js";
 
-const CI = !!process.env.CI;
 const MABO_URL = "https://www.austlii.edu.au/cgi-bin/viewdoc/au/cases/cth/HCA/1992/23.html";
 
 describe("checkSourceFreshness", () => {
-  it.skipIf(CI)(
+  itLive(
     "returns fresh:false for AustLII URL without prior ETags (always stale on first check)",
     async () => {
       const result = await checkSourceFreshness(MABO_URL);
@@ -23,7 +23,7 @@ describe("checkSourceFreshness", () => {
 });
 
 describe("storeSource", () => {
-  it.skipIf(CI)(
+  itLive(
     "downloads and writes a markdown source file",
     async () => {
       const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "auslaw-smoke-"));
@@ -43,7 +43,7 @@ describe("storeSource", () => {
     30_000,
   );
 
-  it.skipIf(CI)(
+  itLive(
     "returns changed:false on second download when content hash matches",
     async () => {
       const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "auslaw-smoke-"));

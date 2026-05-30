@@ -5,11 +5,10 @@
 import { describe, it, expect } from "vitest";
 import { searchAustLii, calculateAuthorityScore, isCaseNameQuery } from "../../services/austlii.js";
 import type { SearchResult } from "../../services/austlii.js";
-
-const CI = !!process.env.CI;
+import { itLive } from "../helpers/live.js";
 
 describe("searchAustLii", () => {
-  it.skipIf(CI)(
+  itLive(
     "returns results for 'Mabo v Queensland'",
     async () => {
       const results = await searchAustLii("Mabo v Queensland", { type: "case", limit: 5 });
@@ -21,7 +20,7 @@ describe("searchAustLii", () => {
     30_000,
   );
 
-  it.skipIf(CI)(
+  itLive(
     "returns HCA cases when jurisdiction is cth",
     async () => {
       const results = await searchAustLii("[1992] HCA 23", {
@@ -36,7 +35,7 @@ describe("searchAustLii", () => {
     30_000,
   );
 
-  it.skipIf(CI)(
+  itLive(
     "returns legislation results when type is legislation",
     async () => {
       const results = await searchAustLii("Privacy Act", {

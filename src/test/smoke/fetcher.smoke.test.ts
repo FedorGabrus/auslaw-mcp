@@ -2,13 +2,12 @@
  * Smoke tests for fetchDocumentText.
  * Network tests are skipped in CI.
  */
-import { describe, it, expect } from "vitest";
+import { describe, expect } from "vitest";
 import { fetchDocumentText } from "../../services/fetcher.js";
-
-const CI = !!process.env.CI;
+import { itLive } from "../helpers/live.js";
 
 describe("fetchDocumentText", () => {
-  it.skipIf(CI)(
+  itLive(
     "fetches an AustLII HTML page and returns text",
     async () => {
       const result = await fetchDocumentText(
@@ -22,7 +21,7 @@ describe("fetchDocumentText", () => {
     30_000,
   );
 
-  it.skipIf(CI)(
+  itLive(
     "fetches a legislation page from AustLII",
     async () => {
       const result = await fetchDocumentText(

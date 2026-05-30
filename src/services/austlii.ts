@@ -1,8 +1,7 @@
-import axios from "axios";
 import * as cheerio from "cheerio";
 import { config } from "../config.js";
 import { REPORTED_CITATION_PATTERNS } from "../constants.js";
-import { austliiRateLimiter } from "../utils/rate-limiter.js";
+import { austliiFetchText } from "./austlii-browser.js";
 
 export interface SearchResult {
   title: string;
@@ -48,15 +47,6 @@ export interface SearchOptions {
   method?: SearchMethod;
   offset?: number; // For pagination - skip first N results
 }
-
-// Browser-like headers required by AustLII
-const AUSTLII_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  Referer: "https://www.austlii.edu.au/forms/search1.html",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-AU,en;q=0.9",
-};
 
 export interface SearchParams {
   query: string;
@@ -258,7 +248,10 @@ export async function searchAustLii(
     searchUrl.searchParams.set("method", searchParams.method);
     searchUrl.searchParams.set("query", searchParams.query);
     searchUrl.searchParams.set("meta", searchParams.meta);
-    searchUrl.searchParams.set("results", String(limit));
+    // NOTE: `results` is deliberately NOT set. AustLII's WAF returns 410 Gone
+    // for the exact signature method+query+meta+results+view (the default
+    // unfiltered search). Omitting `results` keeps method+query+meta+view, which
+    // is accepted; the limit is applied client-side via slice() below.
 
     // Set mask_path for filtering by type/jurisdiction
     if (searchParams.mask_path) {
@@ -277,13 +270,7 @@ export async function searchAustLii(
       searchUrl.searchParams.set("view", "date-latest");
     }
 
-    await austliiRateLimiter.throttle();
-    const response = await axios.get(searchUrl.toString(), {
-      headers: AUSTLII_HEADERS,
-      timeout: config.austlii.timeout,
-    });
-
-    const html = response.data;
+    const { body: html } = await austliiFetchText(searchUrl.toString());
     const $ = cheerio.load(html);
     const results: SearchResult[] = [];
 
@@ -398,7 +385,7 @@ export async function searchAustLii(
 
     return finalResults.slice(0, limit);
   } catch (error) {
-    if (axios.isAxiosError(error)) {
+    if (error instanceof Error) {
       throw new Error(`AustLII search failed: ${error.message}`);
     }
     throw error;

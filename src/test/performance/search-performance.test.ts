@@ -1,7 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { it, expect } from "vitest";
 import { searchAustLii } from "../../services/austlii.js";
-
-const describeLive = process.env.CI ? describe.skip : describe;
+import { describeLive } from "../helpers/live.js";
 
 describeLive("Search Performance", () => {
   it("should complete a simple case search within 10 seconds", async () => {

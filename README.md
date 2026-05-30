@@ -49,6 +49,19 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full development history and futu
 
 ## Quick Start
 
+> **AustLII requires Google Chrome.** AustLII is behind a Cloudflare managed JS
+> challenge that blocks plain HTTP clients, so AustLII search and document
+> retrieval drive a real **Google Chrome** (spawned with remote debugging and
+> controlled over CDP — a Playwright-launched browser is detected, a real Chrome
+> auto-passes). Just have Google Chrome installed; no `playwright install` step
+> is needed (we use `playwright-core` + your system Chrome).
+>
+> A Chrome window opens on first AustLII use; normally the challenge auto-passes
+> with no interaction (solve it by hand only if one appears). This runs **locally
+> on a desktop with a display**. See
+> [docs/austlii-cloudflare.md](docs/austlii-cloudflare.md) and the `AUSTLII_*`
+> settings in `.env.example`.
+
 ### Run with npx (no local clone required)
 
 ```bash

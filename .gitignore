@@ -4,6 +4,9 @@ dist
 *.log
 tmp
 
+# AustLII bypass browser profile + local cache
+.auslaw
+
 # Environment variables
 .env
 .env.local

@@ -14,8 +14,18 @@ const execFileAsync = promisify(execFile);
 import { config } from "../config.js";
 import { MAX_CONTENT_LENGTH } from "../constants.js";
 import { isJadeUrl, extractArticleId, fetchJadeArticleContent } from "./jade.js";
+import { austliiFetchBuffer } from "./austlii-browser.js";
 import { assertFetchableUrl } from "../utils/url-guard.js";
 import { austliiRateLimiter, jadeRateLimiter } from "../utils/rate-limiter.js";
+
+/** AustLII is behind a Cloudflare challenge; its URLs are fetched via a browser. */
+function isAustliiUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith("austlii.edu.au");
+  } catch {
+    return false;
+  }
+}
 
 export interface ParagraphBlock {
   number: number;
@@ -309,22 +319,41 @@ export async function fetchDocumentText(url: string): Promise<FetchResponse> {
   }
 
   try {
-    await austliiRateLimiter.throttle();
+    let buffer: Buffer;
+    let contentType: string;
+    let etag: string | undefined;
+    let lastModified: string | undefined;
 
-    const headers: Record<string, string> = {
-      "User-Agent": config.jade.userAgent,
-    };
+    if (isAustliiUrl(url)) {
+      // AustLII sits behind a Cloudflare challenge — fetch via the browser.
+      // (austliiFetchBuffer applies its own rate limiting.)
+      const res = await austliiFetchBuffer(url);
+      if (res.status >= 400) {
+        throw new Error(`AustLII returned HTTP ${res.status} for ${url}`);
+      }
+      buffer = res.buffer;
+      contentType = res.contentType;
+      // etag / last-modified are not exposed to in-page fetch (CORS) — omit.
+    } else {
+      await austliiRateLimiter.throttle();
 
-    const response = await axios.get(url, {
-      responseType: "arraybuffer",
-      headers,
-      timeout: config.jade.timeout,
-      maxContentLength: MAX_CONTENT_LENGTH,
-    });
+      const headers: Record<string, string> = {
+        "User-Agent": config.jade.userAgent,
+      };
 
-    const buffer = Buffer.from(response.data);
-    const rawContentType = response.headers["content-type"];
-    const contentType = typeof rawContentType === "string" ? rawContentType : "";
+      const response = await axios.get(url, {
+        responseType: "arraybuffer",
+        headers,
+        timeout: config.jade.timeout,
+        maxContentLength: MAX_CONTENT_LENGTH,
+      });
+
+      buffer = Buffer.from(response.data);
+      const rawContentType = response.headers["content-type"];
+      contentType = typeof rawContentType === "string" ? rawContentType : "";
+      etag = (response.headers["etag"] as string) ?? undefined;
+      lastModified = (response.headers["last-modified"] as string) ?? undefined;
+    }
 
     // Detect file type from buffer
     const detectedType = await fileTypeFromBuffer(buffer);
@@ -372,8 +401,8 @@ export async function fetchDocumentText(url: string): Promise<FetchResponse> {
       ocrUsed,
       metadata,
       paragraphs,
-      etag: (response.headers["etag"] as string) ?? undefined,
-      lastModified: (response.headers["last-modified"] as string) ?? undefined,
+      etag,
+      lastModified,
     };
   } catch (error) {
     if (axios.isAxiosError(error)) {

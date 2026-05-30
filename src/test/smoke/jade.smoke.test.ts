@@ -10,11 +10,10 @@ import {
   isJadeUrl,
   extractArticleId,
 } from "../../services/jade.js";
-
-const CI = !!process.env.CI;
+import { itLive } from "../helpers/live.js";
 
 describe("searchJade", () => {
-  it.skipIf(CI)(
+  itLive(
     "returns results for 'native title' when session cookie is configured",
     async () => {
       if (!process.env.JADE_SESSION_COOKIE) {
@@ -46,7 +45,7 @@ describe("searchJade", () => {
 });
 
 describe("resolveArticleFromUrl", () => {
-  it.skipIf(CI)(
+  itLive(
     "resolves Mabo v Queensland article from jade.io URL",
     async () => {
       const article = await resolveArticleFromUrl("https://jade.io/article/67683");

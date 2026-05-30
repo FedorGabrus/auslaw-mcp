@@ -4,6 +4,9 @@ import { fileTypeFromBuffer } from "file-type";
 
 vi.mock("file-type");
 vi.mock("axios");
+vi.mock("../../services/austlii-browser.js", () => ({
+  austliiFetchBuffer: vi.fn(),
+}));
 
 const mockConfig = vi.hoisted(() => ({
   jade: {
@@ -25,6 +28,7 @@ const mockConfig = vi.hoisted(() => ({
 vi.mock("../../config.js", () => ({ config: mockConfig }));
 
 import { fetchDocumentText } from "../../services/fetcher.js";
+import { austliiFetchBuffer } from "../../services/austlii-browser.js";
 
 describe("fetchDocumentText", () => {
   beforeEach(() => {
@@ -144,10 +148,10 @@ describe("fetchDocumentText", () => {
     // Regression: old url.includes("jade.io") would misroute this to jade extraction.
     // assertFetchableUrl permits www.austlii.edu.au; hostname != jade.io so generic path is used.
     const html = "<html><body><p>AustLII generic content</p></body></html>";
-    vi.mocked(axios.get).mockResolvedValueOnce({
-      data: Buffer.from(html),
-      headers: { "content-type": "text/html" },
+    vi.mocked(austliiFetchBuffer).mockResolvedValueOnce({
       status: 200,
+      buffer: Buffer.from(html),
+      contentType: "text/html",
     });
 
     const result = await fetchDocumentText(
@@ -163,10 +167,10 @@ describe("fetchDocumentText", () => {
       <p>[3] Third paragraph concluding.</p>
     </body></html>`;
 
-    vi.mocked(axios.get).mockResolvedValueOnce({
-      data: Buffer.from(html),
-      headers: { "content-type": "text/html" },
+    vi.mocked(austliiFetchBuffer).mockResolvedValueOnce({
       status: 200,
+      buffer: Buffer.from(html),
+      contentType: "text/html",
     });
 
     const result = await fetchDocumentText("https://www.austlii.edu.au/case");

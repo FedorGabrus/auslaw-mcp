@@ -1,19 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import axios from "axios";
 import { fetchDocumentText } from "../../services/fetcher.js";
+import { austliiFetchBuffer } from "../../services/austlii-browser.js";
 import { AUSTLII_JUDGMENT_HTML } from "../fixtures/index.js";
 
-vi.mock("axios");
+// AustLII URLs are fetched via the browser transport (Cloudflare bypass).
+// Mock that seam so content-type handling is exercised offline against fixtures.
+vi.mock("../../services/austlii-browser.js", () => ({
+  austliiFetchBuffer: vi.fn(),
+}));
 vi.mock("file-type", () => ({
   fileTypeFromBuffer: vi.fn().mockResolvedValue(undefined),
 }));
 
-const mockedAxios = vi.mocked(axios, true);
+const mockedBuf = vi.mocked(austliiFetchBuffer);
+
+/** Helper to stub a browser fetch with a given body + content-type. */
+function stubFetch(body: Buffer | string, contentType: string, status = 200) {
+  mockedBuf.mockResolvedValue({
+    status,
+    buffer: typeof body === "string" ? Buffer.from(body) : body,
+    contentType,
+  });
+}
 
 describe("fetchDocumentText (mocked)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedAxios.isAxiosError.mockReturnValue(false);
   });
 
   it("should throw a descriptive error for jade.io URLs instead of returning empty content", async () => {
@@ -25,11 +37,7 @@ describe("fetchDocumentText (mocked)", () => {
   });
 
   it("should extract text from HTML content", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(AUSTLII_JUDGMENT_HTML),
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
+    stubFetch(Buffer.from(AUSTLII_JUDGMENT_HTML), "text/html");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html",
@@ -39,11 +47,7 @@ describe("fetchDocumentText (mocked)", () => {
   });
 
   it("should preserve paragraph numbers [N] in extracted text", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(AUSTLII_JUDGMENT_HTML),
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
+    stubFetch(Buffer.from(AUSTLII_JUDGMENT_HTML), "text/html");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html",
@@ -53,11 +57,7 @@ describe("fetchDocumentText (mocked)", () => {
   });
 
   it("should set correct metadata fields", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(AUSTLII_JUDGMENT_HTML),
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
+    stubFetch(Buffer.from(AUSTLII_JUDGMENT_HTML), "text/html");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html",
@@ -70,11 +70,7 @@ describe("fetchDocumentText (mocked)", () => {
   });
 
   it("should set ocrUsed to false for HTML content", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(AUSTLII_JUDGMENT_HTML),
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
+    stubFetch(Buffer.from(AUSTLII_JUDGMENT_HTML), "text/html");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html",
@@ -84,11 +80,7 @@ describe("fetchDocumentText (mocked)", () => {
 
   it("should handle plain text content type", async () => {
     const plainText = "This is a plain text legal document.";
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(plainText),
-      status: 200,
-      headers: { "content-type": "text/plain" },
-    });
+    stubFetch(plainText, "text/plain");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/doc.txt",
@@ -98,22 +90,24 @@ describe("fetchDocumentText (mocked)", () => {
     expect(result.ocrUsed).toBe(false);
   });
 
-  it("should throw on axios failure", async () => {
-    const axiosError = new Error("Connection refused");
-    mockedAxios.get.mockRejectedValue(axiosError);
-    mockedAxios.isAxiosError.mockReturnValue(true);
+  it("should throw on browser fetch failure", async () => {
+    mockedBuf.mockRejectedValue(new Error("Connection refused"));
 
     await expect(
       fetchDocumentText("https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html"),
     ).rejects.toThrow();
   });
 
+  it("should throw when AustLII returns an error status", async () => {
+    mockedBuf.mockResolvedValue({ status: 410, buffer: Buffer.from(""), contentType: "" });
+
+    await expect(
+      fetchDocumentText("https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html"),
+    ).rejects.toThrow(/HTTP 410/);
+  });
+
   it("should preserve cleaned HTML in response.html for HTML content", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(AUSTLII_JUDGMENT_HTML),
-      status: 200,
-      headers: { "content-type": "text/html" },
-    });
+    stubFetch(Buffer.from(AUSTLII_JUDGMENT_HTML), "text/html");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/1.html",
@@ -128,11 +122,7 @@ describe("fetchDocumentText (mocked)", () => {
 
   it("should not set html field for plain text content", async () => {
     const plainText = "This is a plain text legal document.";
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from(plainText),
-      status: 200,
-      headers: { "content-type": "text/plain" },
-    });
+    stubFetch(plainText, "text/plain");
 
     const result = await fetchDocumentText(
       "https://www.austlii.edu.au/au/cases/cth/HCA/2024/doc.txt",
@@ -141,11 +131,7 @@ describe("fetchDocumentText (mocked)", () => {
   });
 
   it("should throw for unsupported content type", async () => {
-    mockedAxios.get.mockResolvedValue({
-      data: Buffer.from("binary data"),
-      status: 200,
-      headers: { "content-type": "application/octet-stream" },
-    });
+    stubFetch(Buffer.from("binary data"), "application/octet-stream");
 
     await expect(
       fetchDocumentText("https://www.austlii.edu.au/au/cases/cth/HCA/2024/file.bin"),

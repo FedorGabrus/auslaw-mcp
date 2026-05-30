@@ -1,16 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import axios from "axios";
 import { searchAustLii } from "../../services/austlii.js";
+import { austliiFetchText } from "../../services/austlii-browser.js";
 import { AUSTLII_SEARCH_HTML } from "../fixtures/index.js";
 
-vi.mock("axios");
-const mockedAxios = vi.mocked(axios, true);
+// searchAustLii fetches via the browser transport (Cloudflare bypass), not axios.
+// Mock that seam so parsing is exercised offline against fixtures.
+vi.mock("../../services/austlii-browser.js", () => ({
+  austliiFetchText: vi.fn(),
+}));
+const mockedFetch = vi.mocked(austliiFetchText);
 
 describe("searchAustLii (mocked)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedAxios.get.mockResolvedValue({ data: AUSTLII_SEARCH_HTML, status: 200 });
-    mockedAxios.isAxiosError.mockReturnValue(false);
+    mockedFetch.mockResolvedValue({ status: 200, body: AUSTLII_SEARCH_HTML });
   });
 
   it("should parse case results from HTML correctly", async () => {
@@ -63,10 +66,8 @@ describe("searchAustLii (mocked)", () => {
     }
   });
 
-  it("should throw on network failure", async () => {
-    const axiosError = new Error("Network Error");
-    mockedAxios.get.mockRejectedValue(axiosError);
-    mockedAxios.isAxiosError.mockReturnValue(true);
+  it("should throw a wrapped error on transport failure", async () => {
+    mockedFetch.mockRejectedValue(new Error("Network Error"));
 
     await expect(searchAustLii("negligence", { type: "case" })).rejects.toThrow(
       "AustLII search failed",
@@ -75,9 +76,18 @@ describe("searchAustLii (mocked)", () => {
 
   it("should build correct search URL with jurisdiction filter", async () => {
     await searchAustLii("negligence", { type: "case", jurisdiction: "vic" });
-    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
-    const calledUrl = String(mockedAxios.get.mock.calls[0]?.[0] ?? "");
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    const calledUrl = String(mockedFetch.mock.calls[0]?.[0] ?? "");
     expect(calledUrl).toContain("mask_path=au%2Fcases%2Fvic");
+  });
+
+  it("omits the results param to avoid the WAF 410 signature", async () => {
+    await searchAustLii("negligence", { type: "case" });
+    const calledUrl = String(mockedFetch.mock.calls[0]?.[0] ?? "");
+    // method+query+meta+results+view is the toxic 410 signature; results is dropped.
+    expect(calledUrl).not.toContain("results=");
+    expect(calledUrl).toContain("meta=");
+    expect(calledUrl).toContain("view=");
   });
 
   it("filters out non-legislation URLs when searching for legislation", async () => {
@@ -93,7 +103,7 @@ describe("searchAustLii (mocked)", () => {
           <p class="meta"><a>High Court</a></p>
         </li></ul>
       </body></html>`;
-    mockedAxios.get.mockResolvedValueOnce({ data: legislationHtml, status: 200 });
+    mockedFetch.mockResolvedValueOnce({ status: 200, body: legislationHtml });
 
     const results = await searchAustLii("Privacy Act", { type: "legislation" });
     for (const r of results) {
@@ -110,7 +120,7 @@ describe("searchAustLii (mocked)", () => {
           <p class="meta"><a>High Court</a></p>
         </li></ul>
       </body></html>`;
-    mockedAxios.get.mockResolvedValueOnce({ data: htmlWithRelativeUrl, status: 200 });
+    mockedFetch.mockResolvedValueOnce({ status: 200, body: htmlWithRelativeUrl });
 
     const results = await searchAustLii("mabo", { type: "case" });
     expect(results.length).toBeGreaterThan(0);
@@ -120,24 +130,22 @@ describe("searchAustLii (mocked)", () => {
     expect(results[0]!.url).toContain("austlii.edu.au");
   });
 
-  it("rethrows non-AxiosError exceptions from network requests", async () => {
-    const typeError = new TypeError("Failed to fetch");
-    mockedAxios.get.mockRejectedValueOnce(typeError);
-    mockedAxios.isAxiosError.mockReturnValue(false);
+  it("rethrows non-Error exceptions from the browser transport", async () => {
+    mockedFetch.mockRejectedValueOnce("Failed to fetch");
 
-    await expect(searchAustLii("negligence", { type: "case" })).rejects.toThrow("Failed to fetch");
+    await expect(searchAustLii("negligence", { type: "case" })).rejects.toBe("Failed to fetch");
   });
 
-  it("includes offset parameter in search URL when provided (line 270)", async () => {
-    mockedAxios.get.mockResolvedValueOnce({ data: AUSTLII_SEARCH_HTML, status: 200 });
+  it("includes offset parameter in search URL when provided", async () => {
+    mockedFetch.mockResolvedValueOnce({ status: 200, body: AUSTLII_SEARCH_HTML });
 
     await searchAustLii("negligence", { type: "case", offset: 10 });
 
-    const calledUrl = String(mockedAxios.get.mock.calls[0]?.[0] ?? "");
+    const calledUrl = String(mockedFetch.mock.calls[0]?.[0] ?? "");
     expect(calledUrl).toContain("offset=10");
   });
 
-  it("preserves non-decoration query params in relative result URLs (lines 315, 320)", async () => {
+  it("preserves non-decoration query params in relative result URLs", async () => {
     const htmlWithCustomParam = `
       <html><body>
         <ul><li data-count="1." class="multi">
@@ -145,7 +153,7 @@ describe("searchAustLii (mocked)", () => {
           <p class="meta"><a>High Court</a></p>
         </li></ul>
       </body></html>`;
-    mockedAxios.get.mockResolvedValueOnce({ data: htmlWithCustomParam, status: 200 });
+    mockedFetch.mockResolvedValueOnce({ status: 200, body: htmlWithCustomParam });
 
     const results = await searchAustLii("mabo", { type: "case" });
     expect(results.length).toBeGreaterThan(0);

@@ -44,6 +44,9 @@ vi.mock("pdf-parse", () => ({
 
 vi.mock("file-type");
 vi.mock("axios");
+vi.mock("../../services/austlii-browser.js", () => ({
+  austliiFetchBuffer: vi.fn(),
+}));
 vi.mock("../../config.js", () => ({
   config: {
     jade: {
@@ -63,14 +66,16 @@ vi.mock("../../utils/rate-limiter.js", () => ({
 }));
 
 import { fetchDocumentText } from "../../services/fetcher.js";
+import { austliiFetchBuffer } from "../../services/austlii-browser.js";
 
 const PDF_URL = "https://www.austlii.edu.au/cgi-bin/viewdoc/au/cases/cth/HCA/1992/23.pdf";
 
 function mockPdfAxiosResponse() {
-  vi.mocked(axios.get).mockResolvedValueOnce({
-    data: Buffer.from("fake pdf binary"),
-    headers: { "content-type": "application/pdf" },
+  // AustLII PDFs are fetched via the browser transport.
+  vi.mocked(austliiFetchBuffer).mockResolvedValueOnce({
     status: 200,
+    buffer: Buffer.from("fake pdf binary"),
+    contentType: "application/pdf",
   });
   vi.mocked(fileTypeFromBuffer).mockResolvedValue(undefined);
   vi.mocked(axios.isAxiosError).mockReturnValue(false);

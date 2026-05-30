@@ -10,6 +10,7 @@ import path from "node:path";
 import { formatFetchResponse, formatSearchResults } from "./utils/formatter.js";
 import { fetchDocumentText } from "./services/fetcher.js";
 import { searchAustLii, type SearchResult } from "./services/austlii.js";
+import { closeAustliiBrowser } from "./services/austlii-browser.js";
 import { mergeCaseSearchResults } from "./services/search-merge.js";
 import {
   resolveArticle,
@@ -1214,6 +1215,13 @@ async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }
+}
+
+// Best-effort cleanup: close the AustLII bypass browser on shutdown.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void closeAustliiBrowser().finally(() => process.exit(0));
+  });
 }
 
 main().catch((error) => {

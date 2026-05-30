@@ -11,6 +11,35 @@ export interface Config {
     referer: string;
     userAgent: string;
     timeout: number;
+    /**
+     * AustLII sits behind a Cloudflare managed JS challenge that blocks plain
+     * HTTP clients. When true (default), requests are routed through a real
+     * Chrome (spawned with remote debugging and driven over CDP) by the
+     * austlii-browser service.
+     */
+    browserBypass: boolean;
+    /**
+     * Path to the Chrome executable. The bypass spawns a *real* Chrome (not
+     * Playwright's bundled Chromium) with a clean command line so Cloudflare's
+     * managed challenge auto-passes. Default is the macOS Chrome location.
+     */
+    chromePath: string;
+    /** Remote-debugging port for the spawned Chrome (CDP). */
+    cdpPort: number;
+    /**
+     * Attach to an already-running Chrome at this DevTools URL (e.g.
+     * "http://127.0.0.1:9222") instead of spawning one.
+     */
+    cdpUrl?: string;
+    /**
+     * Dedicated Chrome user-data-dir. When unset (default), an ephemeral
+     * per-process profile is used (clean every start — avoids accumulating
+     * WAF-flagged state). Set this to a stable path to persist cf_clearance
+     * across restarts.
+     */
+    browserProfileDir?: string;
+    /** Max ms to wait for a Cloudflare challenge to clear (auto or human-solved). */
+    challengeTimeout: number;
   };
   jade: {
     baseUrl: string;
@@ -68,8 +97,16 @@ export function loadConfig(): Config {
       referer: process.env.AUSTLII_REFERER || "https://www.austlii.edu.au/forms/search1.html",
       userAgent:
         process.env.AUSTLII_USER_AGENT ||
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
       timeout: parseInt(process.env.AUSTLII_TIMEOUT || "60000", 10), // AustLII can be slow
+      browserBypass: process.env.AUSTLII_BROWSER_BYPASS !== "false",
+      chromePath:
+        process.env.AUSTLII_CHROME_PATH ||
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      cdpPort: parseInt(process.env.AUSTLII_CDP_PORT || "9222", 10),
+      cdpUrl: process.env.AUSTLII_CDP_URL || undefined,
+      browserProfileDir: process.env.AUSTLII_BROWSER_PROFILE_DIR || undefined,
+      challengeTimeout: parseInt(process.env.AUSTLII_CHALLENGE_TIMEOUT || "180000", 10),
     },
     jade: {
       baseUrl: process.env.JADE_BASE_URL || "https://jade.io",

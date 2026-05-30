@@ -14,9 +14,7 @@ import {
   searchJade,
 } from "../services/jade.js";
 import type { SearchResult } from "../services/austlii.js";
-
-// Skip live network tests in CI to prevent flaky failures
-const describeLive = process.env.CI ? describe.skip : describe;
+import { describeLive } from "./helpers/live.js";
 
 // Authenticated GWT-RPC tests — require JADE_SESSION_COOKIE env var
 const describeAuth = process.env.CI || !process.env.JADE_SESSION_COOKIE ? describe.skip : describe;
