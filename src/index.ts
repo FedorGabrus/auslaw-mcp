@@ -380,7 +380,10 @@ function createMcpServer(): McpServer {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ error: "No paragraph blocks found in document" }),
+              text: JSON.stringify({
+                error:
+                  "No numbered paragraphs ([N]) found in this document — it may be an older judgment that uses page numbers rather than paragraph numbering. Try a page pinpoint instead.",
+              }),
             },
           ],
         };

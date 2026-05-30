@@ -233,7 +233,40 @@ function cleanHtmlForOutput(html: string): string {
   return bodyHtml || $.html() || "";
 }
 
-function extractParagraphBlocks(html: string): ParagraphBlock[] {
+/**
+ * Fallback paragraph extraction over flattened judgment text.
+ *
+ * Older AustLII judgments don't wrap each numbered paragraph in its own
+ * `<p>`/`<div>` — the `[N]` markers appear mid-text in one large block. This
+ * walks the flattened text, splitting at each `[N]` marker that continues the
+ * running paragraph sequence (1, 2, 3, …). The strict sequence check rejects
+ * embedded bracketed citation years such as `[1932] UKHL 100` or `[2024] HCA 1`,
+ * which never line up with the next expected paragraph number.
+ */
+export function extractParagraphsFromText(text: string): ParagraphBlock[] {
+  const out: ParagraphBlock[] = [];
+  const re = /\[(\d+)\]/g;
+  let m: RegExpExecArray | null;
+  let expected = 1;
+  let prev: { num: number; start: number } | null = null;
+
+  while ((m = re.exec(text)) !== null) {
+    const num = parseInt(m[1]!, 10);
+    if (num !== expected) continue; // skip citation years / out-of-sequence brackets
+    if (prev) {
+      out.push({ number: prev.num, text: text.slice(prev.start, m.index).trim() });
+    }
+    prev = { num, start: m.index + m[0].length };
+    expected = num + 1;
+  }
+  if (prev) {
+    out.push({ number: prev.num, text: text.slice(prev.start).trim() });
+  }
+
+  return out;
+}
+
+export function extractParagraphBlocks(html: string): ParagraphBlock[] {
   const $ = cheerio.load(html);
   const paragraphs: ParagraphBlock[] = [];
 
@@ -247,6 +280,12 @@ function extractParagraphBlocks(html: string): ParagraphBlock[] {
       });
     }
   });
+
+  // Older judgments lack per-paragraph block elements: fall back to scanning
+  // the flattened document text for sequential [N] markers.
+  if (paragraphs.length === 0) {
+    return extractParagraphsFromText($.root().text());
+  }
 
   return paragraphs;
 }
