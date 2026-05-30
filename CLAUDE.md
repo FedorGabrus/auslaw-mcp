@@ -23,6 +23,7 @@ npm run lint:fix       # Auto-fix lint issues
 - **`prod` is the real main/production branch** — it is the default working branch and the base for PRs.
 - **`main` is kept only for backward compatibility** — do not treat it as the integration branch.
 - **Never push directly to `prod`** — a GitHub branch-protection rule blocks direct pushes. Open a PR against `prod` and merge through it.
+- **This repo has an `upstream` remote (`russellbrenner/auslaw-mcp`).** `gh` defaults to upstream, so a bare `gh pr create` fails with "Base sha can't be blank / No commits between …". Always target the fork explicitly: `gh pr create --repo FedorGabrus/auslaw-mcp --base prod …`. Run once to make it the default: `gh repo set-default FedorGabrus/auslaw-mcp`.
 
 ## Key Architecture
 
