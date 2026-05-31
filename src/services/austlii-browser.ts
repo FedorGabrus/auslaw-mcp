@@ -43,6 +43,38 @@ let sessionPromise: Promise<Session> | null = null;
 /** Serialises browser operations — a shared page must not handle concurrent work. */
 let opQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * True for errors that mean the browser/context/page (or the CDP socket) is gone
+ * and the session must be rebuilt — distinct from the in-page "context was
+ * destroyed … navigation" reload that `fetchWithRetry` recovers from in place.
+ * Deliberately does NOT match bare "context" (that phrase appears in the
+ * navigation case too); keys off the closed/disconnected wording instead.
+ */
+export function isConnectionDead(error: unknown): boolean {
+  return /has been closed|Target closed|has been disconnected|Connection closed|websocket/i.test(
+    String(error),
+  );
+}
+
+/** Kill a child process and wait for it to exit (SIGTERM, then SIGKILL on timeout). */
+function killAndWait(proc: ChildProcess, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (proc.killed || proc.exitCode !== null) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      resolve();
+    }, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    proc.kill();
+  });
+}
+
 /** Poll the Chrome DevTools endpoint until it is ready (or time out). */
 async function waitForCdp(port: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -67,6 +99,17 @@ async function getSession(): Promise<Session> {
       "AustLII access is disabled (AUSTLII_BROWSER_BYPASS=false). AustLII is behind a " +
         "Cloudflare challenge and cannot be reached without the browser transport.",
     );
+  }
+  // Proactively discard a session whose Chrome has gone away (window closed,
+  // crash, idle-exit) so the rebuild below replaces it instead of handing back a
+  // dead reference.
+  if (sessionPromise) {
+    try {
+      const existing = await sessionPromise;
+      if (!existing.browser.isConnected()) await invalidateSession();
+    } catch {
+      sessionPromise = null;
+    }
   }
   if (!sessionPromise) {
     sessionPromise = (async () => {
@@ -267,14 +310,34 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * Acquire a warmed page and run an operation against it. If the operation (or
+ * session acquisition) fails because the browser/context was closed, rebuild the
+ * session and retry exactly once — a single retry so a missing display or bad
+ * chromePath cannot spin into a respawn loop.
+ */
+async function withSession<T>(op: (page: Page) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const { context } = await getSession();
+    try {
+      const page = await getPage(context);
+      await ensureWarm(page);
+      return await op(page);
+    } catch (error) {
+      if (attempt === 0 && isConnectionDead(error)) {
+        await invalidateSession();
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 /** Fetch an AustLII page as text (used for search). */
 export async function austliiFetchText(url: string): Promise<{ status: number; body: string }> {
   return enqueue(async () => {
     await austliiRateLimiter.throttle();
-    const { context } = await getSession();
-    const page = await getPage(context);
-    await ensureWarm(page);
-    return fetchWithRetry(page, url, fetchTextInPage);
+    return withSession((page) => fetchWithRetry(page, url, fetchTextInPage));
   });
 }
 
@@ -284,10 +347,7 @@ export async function austliiFetchBuffer(
 ): Promise<{ status: number; buffer: Buffer; contentType: string }> {
   return enqueue(async () => {
     await austliiRateLimiter.throttle();
-    const { context } = await getSession();
-    const page = await getPage(context);
-    await ensureWarm(page);
-    const res = await fetchWithRetry(page, url, fetchBufferInPage);
+    const res = await withSession((page) => fetchWithRetry(page, url, fetchBufferInPage));
     return {
       status: res.status,
       buffer: Buffer.from(res.b64, "base64"),
@@ -296,19 +356,33 @@ export async function austliiFetchBuffer(
   });
 }
 
-/** Close the CDP connection and the spawned Chrome (best-effort; call on shutdown). */
-export async function closeAustliiBrowser(): Promise<void> {
+/**
+ * Tear down the current session: clear the memo, close the CDP connection, kill
+ * the spawned Chrome (waiting for it to exit so the debug port is free before any
+ * respawn on the same port), and remove the ephemeral profile. Best-effort.
+ */
+async function invalidateSession(): Promise<void> {
   const pending = sessionPromise;
   sessionPromise = null;
   warmed = false;
   if (!pending) return;
+  let session: Session;
   try {
-    const { browser, chrome, ephemeralDir } = await pending;
-    await browser.close().catch(() => {});
-    // connectOverCDP does not stop the spawned browser — kill it explicitly.
-    if (chrome && !chrome.killed) chrome.kill();
-    if (ephemeralDir) await rm(ephemeralDir, { recursive: true, force: true }).catch(() => {});
+    session = await pending;
   } catch {
-    // never opened / already gone
+    return; // never opened
   }
+  const { browser, chrome, ephemeralDir } = session;
+  await browser.close().catch(() => {});
+  // connectOverCDP does not stop the spawned browser — kill it explicitly and
+  // wait for exit (the port must be released before getSession respawns on it).
+  // `chrome` is undefined when we attached to a user-run Chrome via cdpUrl; leave
+  // that one running.
+  if (chrome) await killAndWait(chrome, 5_000);
+  if (ephemeralDir) await rm(ephemeralDir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Close the CDP connection and the spawned Chrome (best-effort; call on shutdown). */
+export async function closeAustliiBrowser(): Promise<void> {
+  await invalidateSession();
 }
